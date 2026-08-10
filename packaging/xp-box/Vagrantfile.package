@@ -1,0 +1,16 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+# Embedded in the packaged box metadata.
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "c-weather-gtk2/windows-xp-sp3"
+  config.vm.guest = :windows
+  config.vm.communicator = "winrm"
+
+  config.winrm.username = "vagrant"
+  config.winrm.password = "vagrant"
+  config.winrm.transport = :plaintext
+  config.winrm.basic_auth_only = true
+  config.winrm.timeout = 1800
+  config.vm.boot_timeout = 1800
+end

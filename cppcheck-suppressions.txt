@@ -1,0 +1,2 @@
+// curl WRITEFUNCTION callback signature requires non-const char*
+constParameterCallback:src/http.c

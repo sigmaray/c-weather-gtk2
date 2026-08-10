@@ -1,0 +1,88 @@
+# Cross-compile c-weather-gtk2 for Windows XP (i686 MinGW32).
+
+MINGW32_PREFIX ?= $(abspath toolchain/mingw32)
+MINGW32_BIN := $(MINGW32_PREFIX)/bin
+CROSS_SYSROOT ?= $(abspath toolchain/cross-deb/usr)
+
+export PATH := $(MINGW32_BIN):$(PATH)
+PKG_CONFIG ?= pkg-config
+export PKG_CONFIG
+export PKG_CONFIG_PATH := $(MINGW32_PREFIX)/lib/pkgconfig
+export PKG_CONFIG_SYSROOT_DIR := $(abspath toolchain)
+
+CC ?= i686-w64-mingw32-gcc
+STATIC ?= 0
+
+IS_WINDOWS := 1
+
+XP_CFLAGS := -D_WIN32_WINNT=0x0501 -O2 -Wall -Wextra -std=c99 \
+	-Isrc -Ithird_party -Wno-deprecated-declarations
+
+PKG_CONFIG_ENV := PKG_CONFIG_PATH=$(MINGW32_PREFIX)/lib/pkgconfig \
+	PKG_CONFIG_SYSROOT_DIR=$(abspath toolchain)
+
+PKG_CFLAGS := $(shell $(PKG_CONFIG_ENV) pkg-config --cflags gtk+-2.0 libcurl 2>/dev/null)
+PKG_LIBS := $(shell $(PKG_CONFIG_ENV) pkg-config --libs gtk+-2.0 libcurl 2>/dev/null)
+
+ALL_CFLAGS := $(XP_CFLAGS) $(PKG_CFLAGS)
+LDFLAGS ?=
+LDFLAGS += -L$(MINGW32_PREFIX)/lib
+LIBS := $(PKG_LIBS) -lm
+
+ifeq ($(STATIC),1)
+  LDFLAGS += -static-libgcc
+  LIBS := $(shell $(PKG_CONFIG_ENV) pkg-config --libs gtk+-2.0 2>/dev/null) \
+	$(shell $(PKG_CONFIG_ENV) pkg-config --static --libs libcurl 2>/dev/null) -lm
+  LDFLAGS += -static-libstdc++
+  LIBS += -Wl,-Bstatic -lwinpthread -Wl,-Bdynamic
+endif
+
+SRCS := \
+	src/main.c \
+	src/http.c \
+	src/log.c \
+	src/history.c \
+	src/settings.c \
+	src/weather.c \
+	src/icon.c \
+	src/ui.c \
+	third_party/cJSON.c
+
+OBJS := $(SRCS:.c=.o)
+
+TEST_LIB_SRCS := \
+	src/http.c src/log.c src/history.c src/settings.c \
+	src/weather.c src/icon.c third_party/cJSON.c
+TEST_LIB_OBJS := $(TEST_LIB_SRCS:.c=.o)
+
+TEST_OBJS := tests/run_tests.o tests/test_weather.o tests/test_settings.o \
+	tests/test_history.o tests/test_http.o tests/test_icon.o
+
+# Drop leftover native ELF objects so MinGW link works after a Linux build.
+_ := $(shell for o in $(OBJS) $(TEST_LIB_OBJS) $(TEST_OBJS); do \
+	[ -f "$$o" ] || continue; \
+	file -b "$$o" 2>/dev/null | grep -qiE 'COFF|PE32' || rm -f "$$o"; \
+done)
+
+.PHONY: all clean test
+
+all: c-weather-gtk2.exe
+
+c-weather-gtk2.exe: $(OBJS)
+	$(CC) $(LDFLAGS) -mwindows -o $@ $(OBJS) $(LIBS)
+
+%.o: %.c
+	$(CC) $(ALL_CFLAGS) -c -o $@ $<
+
+tests/%.o: tests/%.c
+	$(CC) $(ALL_CFLAGS) -Itests -c -o $@ $<
+
+test: c-weather-gtk2-tests.exe
+	./c-weather-gtk2-tests.exe
+
+c-weather-gtk2-tests.exe: $(TEST_OBJS) $(TEST_LIB_OBJS)
+	$(CC) $(LDFLAGS) -mconsole -o $@ $(TEST_OBJS) $(TEST_LIB_OBJS) $(LIBS)
+
+clean:
+	rm -f $(OBJS) $(TEST_OBJS) $(TEST_LIB_OBJS) \
+		c-weather-gtk2.exe c-weather-gtk2-tests.exe

@@ -1,0 +1,14 @@
+c-weather-gtk2
+c-weather-gtk2.exe
+*.o
+settings.json
+dist-win/
+c-weather-gtk2-tests
+c-weather-gtk2-tests.exe
+toolchain/
+dist-xp/
+packaging/curl-ca-bundle.crt
+packaging/xp-box/cache/
+.vagrant/
+.vagrant-xp-bake/
+*.box

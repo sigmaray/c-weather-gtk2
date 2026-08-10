@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=C Weather (GTK2)
+Comment=Tray weather temperature
+Exec=c-weather-gtk2
+Icon=c-weather-gtk2
+Terminal=false
+Categories=Utility;Monitor;
+StartupNotify=false
