@@ -39,20 +39,34 @@ done
 
 mkdir -p "$CACHE" "$ROOT/toolchain"
 
+# Exact package name: next field must be a version (digit), not a suffix
+# like curl-winssl / harfbuzz-utils / brotli-testdata / libwinpthread-git.
 pick_latest() {
-  local prefix="$1"
-  curl -fsSL "$MIRROR/" \
-    | grep -oE "${prefix}-[^\"]+\.pkg\.tar\.zst" \
+  local name="$1"
+  local file
+  file="$(curl -fsSL "$MIRROR/" \
+    | grep -oE "${name}-[0-9][^\"]+\.pkg\.tar\.zst" \
     | grep -vE '\-(docs|debug|dbgsym|static)-' \
-    | sort -u \
-    | tail -1
+    | sort -uV \
+    | tail -1)"
+  if [[ -z "$file" ]]; then
+    echo "No package matched: $name" >&2
+    exit 1
+  fi
+  printf '%s\n' "$file"
 }
 
 pick_gcc() {
-  curl -fsSL "$MIRROR/" \
+  local file
+  file="$(curl -fsSL "$MIRROR/" \
     | grep -oE 'mingw-w64-i686-gcc-[0-9][^"]+\.pkg\.tar\.zst' \
-    | sort -u \
-    | tail -1
+    | sort -uV \
+    | tail -1)"
+  if [[ -z "$file" ]]; then
+    echo "No package matched: mingw-w64-i686-gcc" >&2
+    exit 1
+  fi
+  printf '%s\n' "$file"
 }
 
 fetch_pkg() {
@@ -116,6 +130,20 @@ for pkg in "${SEEDS[@]}"; do
   [[ -n "$pkg" ]] || continue
   fetch_pkg "$pkg"
 done
+
+if [[ ! -f "$PREFIX/include/glib-2.0/glib.h" ]]; then
+  echo "MinGW32 toolchain missing glib.h under $PREFIX" >&2
+  exit 1
+fi
+if command -v pkg-config >/dev/null; then
+  if ! PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig" PKG_CONFIG_SYSROOT_DIR="$ROOT/toolchain" \
+      pkg-config --exists gtk+-2.0 libcurl; then
+    echo "pkg-config cannot resolve gtk+-2.0/libcurl after toolchain install" >&2
+    PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig" PKG_CONFIG_SYSROOT_DIR="$ROOT/toolchain" \
+      pkg-config --errors-to-stdout --print-errors gtk+-2.0 libcurl >&2 || true
+    exit 1
+  fi
+fi
 
 date -Iseconds >"$STAMP"
 ensure_cross_compiler

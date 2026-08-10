@@ -21,8 +21,11 @@ XP_CFLAGS := -D_WIN32_WINNT=0x0501 -O2 -Wall -Wextra -std=c99 \
 PKG_CONFIG_ENV := PKG_CONFIG_PATH=$(MINGW32_PREFIX)/lib/pkgconfig \
 	PKG_CONFIG_SYSROOT_DIR=$(abspath toolchain)
 
-PKG_CFLAGS := $(shell $(PKG_CONFIG_ENV) pkg-config --cflags gtk+-2.0 libcurl 2>/dev/null)
-PKG_LIBS := $(shell $(PKG_CONFIG_ENV) pkg-config --libs gtk+-2.0 libcurl 2>/dev/null)
+PKG_CFLAGS := $(shell $(PKG_CONFIG_ENV) pkg-config --cflags gtk+-2.0 libcurl)
+PKG_LIBS := $(shell $(PKG_CONFIG_ENV) pkg-config --libs gtk+-2.0 libcurl)
+ifeq ($(strip $(PKG_CFLAGS)),)
+  $(error pkg-config failed for gtk+-2.0/libcurl; run packaging/mingw32-toolchain.sh)
+endif
 
 ALL_CFLAGS := $(XP_CFLAGS) $(PKG_CFLAGS)
 LDFLAGS ?=
