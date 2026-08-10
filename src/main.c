@@ -26,7 +26,6 @@ typedef struct {
     GtkStatusIcon *temp_icon;
     GtkStatusIcon *weather_icon;
     GtkWidget *menu;
-    GtkWidget *weather_menu;
     GtkWidget *item_temp;
     GtkWidget *item_weather;
     GtkWidget *item_updated;
@@ -98,41 +97,26 @@ static void status_icon_set_from_theme(GtkStatusIcon *icon, const char *dir,
     gtk_status_icon_set_from_icon_name(icon, name);
 }
 
-static void popup_tray_menu(GtkStatusIcon *status_icon, GtkWidget *menu,
-                            guint button, guint32 activate_time) {
-    (void)status_icon;
-    if (!menu) {
+static void popup_tray_menu(GtkStatusIcon *status_icon, guint button,
+                            guint32 activate_time) {
+    if (!g_tray.menu || !status_icon) {
         return;
     }
-    gtk_widget_show_all(menu);
-    gtk_menu_popup(GTK_MENU(menu), NULL, NULL, gtk_status_icon_position_menu,
-                   g_tray.temp_icon, button, activate_time);
+    gtk_widget_show_all(g_tray.menu);
+    gtk_menu_popup(GTK_MENU(g_tray.menu), NULL, NULL,
+                   gtk_status_icon_position_menu, status_icon, button,
+                   activate_time);
 }
 
-static void on_temp_popup(GtkStatusIcon *icon, guint button,
+static void on_tray_popup(GtkStatusIcon *icon, guint button,
                           guint32 activate_time, gpointer data) {
     (void)data;
-    popup_tray_menu(icon, g_tray.menu, button, activate_time);
+    popup_tray_menu(icon, button, activate_time);
 }
 
-static void on_weather_popup(GtkStatusIcon *icon, guint button,
-                             guint32 activate_time, gpointer data) {
+static void on_tray_activate(GtkStatusIcon *icon, gpointer data) {
     (void)data;
-    popup_tray_menu(icon, g_tray.weather_menu, button, activate_time);
-}
-
-static void on_temp_activate(GtkStatusIcon *icon, gpointer data) {
-    (void)icon;
-    (void)data;
-    popup_tray_menu(g_tray.temp_icon, g_tray.menu, 1,
-                    gtk_get_current_event_time());
-}
-
-static void on_weather_activate(GtkStatusIcon *icon, gpointer data) {
-    (void)icon;
-    (void)data;
-    popup_tray_menu(g_tray.weather_icon, g_tray.weather_menu, 1,
-                    gtk_get_current_event_time());
+    popup_tray_menu(icon, 1, gtk_get_current_event_time());
 }
 
 static void update_menu_labels(void) {
@@ -490,14 +474,14 @@ static void create_tray(void) {
     g_free(temp0);
     g_free(code0);
 
-    g_signal_connect(g_tray.temp_icon, "popup-menu", G_CALLBACK(on_temp_popup),
+    g_signal_connect(g_tray.temp_icon, "popup-menu", G_CALLBACK(on_tray_popup),
                      NULL);
-    g_signal_connect(g_tray.temp_icon, "activate", G_CALLBACK(on_temp_activate),
+    g_signal_connect(g_tray.temp_icon, "activate", G_CALLBACK(on_tray_activate),
                      NULL);
     g_signal_connect(g_tray.weather_icon, "popup-menu",
-                     G_CALLBACK(on_weather_popup), NULL);
+                     G_CALLBACK(on_tray_popup), NULL);
     g_signal_connect(g_tray.weather_icon, "activate",
-                     G_CALLBACK(on_weather_activate), NULL);
+                     G_CALLBACK(on_tray_activate), NULL);
 
     gtk_status_icon_set_visible(g_tray.temp_icon, TRUE);
     gtk_status_icon_set_visible(g_tray.weather_icon, TRUE);
@@ -536,22 +520,7 @@ static void create_tray(void) {
                           gtk_separator_menu_item_new());
     add_action_item(g_tray.menu, "Выйти", G_CALLBACK(on_quit));
 
-    g_tray.weather_menu = gtk_menu_new();
-    add_action_item(g_tray.weather_menu, "Обновить сейчас", G_CALLBACK(on_refresh));
-    add_action_item(g_tray.weather_menu, "Подробная информация о погоде",
-                    G_CALLBACK(on_details));
-    add_action_item(g_tray.weather_menu, "Настройки", G_CALLBACK(on_settings));
-    add_action_item(g_tray.weather_menu, "Как пользоваться", G_CALLBACK(on_help));
-    add_action_item(g_tray.weather_menu, "Показать последние API-запросы",
-                    G_CALLBACK(on_requests));
-    add_action_item(g_tray.weather_menu, "Показать ошибки API",
-                    G_CALLBACK(on_errors));
-    gtk_menu_shell_append(GTK_MENU_SHELL(g_tray.weather_menu),
-                          gtk_separator_menu_item_new());
-    add_action_item(g_tray.weather_menu, "Выйти", G_CALLBACK(on_quit));
-
     gtk_widget_show_all(g_tray.menu);
-    gtk_widget_show_all(g_tray.weather_menu);
 }
 
 static void cleanup_icon_dir(void) {
