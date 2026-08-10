@@ -51,7 +51,7 @@ pick_latest() {
     | tail -1)"
   if [[ -z "$file" ]]; then
     echo "No package matched: $name" >&2
-    exit 1
+    return 1
   fi
   printf '%s\n' "$file"
 }
@@ -64,9 +64,39 @@ pick_gcc() {
     | tail -1)"
   if [[ -z "$file" ]]; then
     echo "No package matched: mingw-w64-i686-gcc" >&2
-    exit 1
+    return 1
   fi
   printf '%s\n' "$file"
+}
+
+# Skip heavy/unneeded runtime deps pulled by glib2/gtk2 etc.
+skip_depend() {
+  case "$1" in
+    mingw-w64-i686-python|mingw-w64-i686-python-*|mingw-w64-i686-*-docs|\
+    mingw-w64-i686-gobject-introspection*|mingw-w64-i686-*-icon-theme*|\
+    mingw-w64-i686-adwaita-icon-theme*|mingw-w64-i686-hicolor-icon-theme*|\
+    mingw-w64-i686-librsvg*|mingw-w64-i686-gtk-update-icon-cache*|\
+    mingw-w64-i686-tzdata*)
+      return 0 ;;
+  esac
+  return 1
+}
+
+# Strip version constraints: "mingw-w64-i686-atk>=1.29.2" -> "mingw-w64-i686-atk"
+normalize_depend() {
+  local dep="$1"
+  dep="${dep%%[><=]*}"
+  printf '%s\n' "$dep"
+}
+
+pkginfo_depends() {
+  local archive="$1"
+  # Prefer already-decompressed tar; else stream from zst.
+  if [[ -f "${archive%.zst}.tar" ]]; then
+    tar xf "${archive%.zst}.tar" -O .PKGINFO 2>/dev/null
+  else
+    tar -I zstd -xf "$archive" -O .PKGINFO 2>/dev/null
+  fi | awk '/^depend = / { print $3 }'
 }
 
 fetch_pkg() {
@@ -87,48 +117,114 @@ fetch_pkg() {
 
 mkdir -p "$PREFIX"
 
+# Index mirror once (package name -> latest archive).
+echo "Indexing MinGW32 mirror..."
+MAP_FILE="$CACHE/mingw32-pkg-index.txt"
+LISTING="$CACHE/mingw32-listing.txt"
+curl -fsSL "$MIRROR/" \
+  | grep -oE 'mingw-w64-i686-[^"]+\.pkg\.tar\.zst' \
+  | grep -vE '\-(docs|debug|dbgsym|static)-' \
+  >"$LISTING"
+python3 - "$MAP_FILE" "$LISTING" <<'PY'
+import re, sys
+from collections import defaultdict
+out, listing = sys.argv[1], sys.argv[2]
+buckets = defaultdict(list)
+# Split at the version: last "-<digit>" before .pkg.tar.zst
+pat = re.compile(r'^(mingw-w64-i686-.+?)-(\d[^/]*)\.pkg\.tar\.zst$')
+with open(listing) as fh:
+    for line in fh:
+        line = line.strip()
+        m = pat.match(line)
+        if not m:
+            continue
+        buckets[m.group(1)].append(line)
+
+lines = []
+for name, files in buckets.items():
+    files = sorted(set(files), key=lambda f: [int(x) if x.isdigit() else x for x in re.split(r'(\d+)', f)])
+    lines.append(f"{name} {files[-1]}")
+open(out, 'w').write('\n'.join(sorted(lines)) + '\n')
+print(f"Indexed {len(lines)} packages", file=sys.stderr)
+PY
+lookup_pkg() {
+  local name="$1"
+  case "$name" in
+    mingw-w64-i686-cc-libs) name=mingw-w64-i686-gcc-libs ;;
+    mingw-w64-i686-cc) name=mingw-w64-i686-gcc ;;
+  esac
+  awk -v n="$name" '$1 == n { print $2; exit }' "$MAP_FILE"
+}
+
 echo "Fetching MinGW32 runtime/dev packages..."
 SEEDS=(
-  "$(pick_latest 'mingw-w64-i686-gcc-libs')"
-  "$(pick_latest 'mingw-w64-i686-gtk2')"
-  "$(pick_latest 'mingw-w64-i686-curl')"
-  "$(pick_latest 'mingw-w64-i686-pkg-config')"
-  "$(pick_latest 'mingw-w64-i686-cairo')"
-  "$(pick_latest 'mingw-w64-i686-pango')"
-  "$(pick_latest 'mingw-w64-i686-glib2')"
-  "$(pick_latest 'mingw-w64-i686-gdk-pixbuf2')"
-  "$(pick_latest 'mingw-w64-i686-libpng')"
-  "$(pick_latest 'mingw-w64-i686-zlib')"
-  "$(pick_latest 'mingw-w64-i686-openssl')"
-  "$(pick_latest 'mingw-w64-i686-ca-certificates')"
-  "$(pick_latest 'mingw-w64-i686-libwinpthread')"
-  "$(pick_latest 'mingw-w64-i686-harfbuzz')"
-  "$(pick_latest 'mingw-w64-i686-fontconfig')"
-  "$(pick_latest 'mingw-w64-i686-freetype')"
-  "$(pick_latest 'mingw-w64-i686-fribidi')"
-  "$(pick_latest 'mingw-w64-i686-bzip2')"
-  "$(pick_latest 'mingw-w64-i686-brotli')"
-  "$(pick_latest 'mingw-w64-i686-expat')"
-  "$(pick_latest 'mingw-w64-i686-pixman')"
-  "$(pick_latest 'mingw-w64-i686-libjpeg-turbo')"
-  "$(pick_latest 'mingw-w64-i686-libtiff')"
-  "$(pick_latest 'mingw-w64-i686-libwebp')"
-  "$(pick_latest 'mingw-w64-i686-libxml2')"
-  "$(pick_latest 'mingw-w64-i686-libidn2')"
-  "$(pick_latest 'mingw-w64-i686-atk')"
+  mingw-w64-i686-gcc-libs
+  mingw-w64-i686-gtk2
+  mingw-w64-i686-curl
+  mingw-w64-i686-pkg-config
+  mingw-w64-i686-cairo
+  mingw-w64-i686-pango
+  mingw-w64-i686-glib2
+  mingw-w64-i686-gdk-pixbuf2
+  mingw-w64-i686-libpng
+  mingw-w64-i686-zlib
+  mingw-w64-i686-openssl
+  mingw-w64-i686-ca-certificates
+  mingw-w64-i686-libwinpthread
+  mingw-w64-i686-harfbuzz
+  mingw-w64-i686-fontconfig
+  mingw-w64-i686-freetype
+  mingw-w64-i686-fribidi
+  mingw-w64-i686-bzip2
+  mingw-w64-i686-brotli
+  mingw-w64-i686-expat
+  mingw-w64-i686-pixman
+  mingw-w64-i686-libjpeg-turbo
+  mingw-w64-i686-libtiff
+  mingw-w64-i686-libwebp
+  mingw-w64-i686-libxml2
+  mingw-w64-i686-libidn2
+  mingw-w64-i686-atk
 )
 
 if [[ "${TOOLCHAIN_NATIVE_XP:-0}" == "1" ]]; then
   SEEDS+=(
-    "$(pick_gcc)"
-    "$(pick_latest 'mingw-w64-i686-binutils')"
-    "$(pick_latest 'mingw-w64-i686-make')"
+    mingw-w64-i686-gcc
+    mingw-w64-i686-binutils
+    mingw-w64-i686-make
   )
 fi
 
-for pkg in "${SEEDS[@]}"; do
-  [[ -n "$pkg" ]] || continue
-  fetch_pkg "$pkg"
+declare -A INSTALLED=()
+QUEUE=("${SEEDS[@]}")
+
+while ((${#QUEUE[@]})); do
+  name="${QUEUE[0]}"
+  QUEUE=("${QUEUE[@]:1}")
+  [[ -n "${INSTALLED[$name]:-}" ]] && continue
+  if skip_depend "$name"; then
+    INSTALLED["$name"]=skip
+    continue
+  fi
+  file="$(lookup_pkg "$name")"
+  if [[ -z "$file" ]]; then
+    # Fallback for odd version schemes (e.g. libwinpthread-git only).
+    file="$(pick_latest "$name" 2>/dev/null || true)"
+  fi
+  if [[ -z "$file" ]]; then
+    echo "WARNING: no archive for dependency $name" >&2
+    INSTALLED["$name"]=missing
+    continue
+  fi
+  fetch_pkg "$file"
+  INSTALLED["$name"]="$file"
+  while IFS= read -r dep; do
+    [[ -z "$dep" ]] && continue
+    dep="$(normalize_depend "$dep")"
+    [[ -z "$dep" ]] && continue
+    [[ -n "${INSTALLED[$dep]:-}" ]] && continue
+    QUEUE+=("$dep")
+  done < <(pkginfo_depends "$CACHE/$file")
 done
 
 if [[ ! -f "$PREFIX/include/glib-2.0/glib.h" ]]; then
