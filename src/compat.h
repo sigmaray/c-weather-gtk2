@@ -27,9 +27,10 @@ static inline struct tm *localtime_r(const time_t *timep, struct tm *result) {
 /*
  * XP-safe clock_gettime via QueryPerformanceCounter.
  * Do not use MinGW winpthread's clock_gettime: it imports GetTickCount64
- * (Vista+), which fails at load time on Windows XP.
+ * (Vista+), which fails at load time on Windows XP. Newer MinGW declares
+ * clock_gettime in pthread_time.h, so provide a distinct symbol and redirect.
  */
-static inline int clock_gettime(int clk_id, struct timespec *tp) {
+static inline int cw_clock_gettime(int clk_id, struct timespec *tp) {
     (void)clk_id;
     static LARGE_INTEGER freq;
     static BOOL have_freq = FALSE;
@@ -49,6 +50,9 @@ static inline int clock_gettime(int clk_id, struct timespec *tp) {
                          freq.QuadPart);
     return 0;
 }
+
+#undef clock_gettime
+#define clock_gettime(clk, tp) cw_clock_gettime((clk), (tp))
 #else
 #include <strings.h>
 #endif
