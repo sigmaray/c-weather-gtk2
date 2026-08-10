@@ -1,0 +1,162 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    name: Build (linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            pkg-config \
+            libgtk2.0-dev \
+            libcurl4-openssl-dev \
+            libcairo2-dev \
+            librsvg2-dev \
+            wget \
+            file \
+            imagemagick
+
+      - name: Build (static-preferring link)
+        env:
+          CFLAGS: -O2 -Werror
+        run: |
+          make clean
+          make STATIC=1
+
+      - name: Package Linux AppImage
+        env:
+          DEPLOY_GTK_VERSION: "2"
+        run: |
+          set -euo pipefail
+          arch="$(uname -m)"
+          out="c-weather-gtk2-linux-${arch}.AppImage"
+
+          convert -size 256x256 xc:'#2B6CB0' -fill white -gravity center \
+            -pointsize 96 -annotate 0 'W' packaging/c-weather-gtk2.png
+
+          mkdir -p AppDir/usr/bin AppDir/usr/share/applications \
+            AppDir/usr/share/icons/hicolor/256x256/apps
+          cp c-weather-gtk2 AppDir/usr/bin/
+          cp packaging/c-weather-gtk2.desktop AppDir/usr/share/applications/
+          cp packaging/c-weather-gtk2.png \
+            AppDir/usr/share/icons/hicolor/256x256/apps/c-weather-gtk2.png
+          cp packaging/c-weather-gtk2.png AppDir/c-weather-gtk2.png
+
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-${arch}.AppImage
+          wget -q https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh
+          chmod +x linuxdeploy-${arch}.AppImage linuxdeploy-plugin-gtk.sh packaging/*.sh
+
+          # GitHub-hosted runners often lack FUSE for AppImages.
+          ./linuxdeploy-${arch}.AppImage --appimage-extract
+          ./squashfs-root/AppRun \
+            --appdir AppDir \
+            --executable AppDir/usr/bin/c-weather-gtk2 \
+            --desktop-file packaging/c-weather-gtk2.desktop \
+            --icon-file packaging/c-weather-gtk2.png \
+            --plugin gtk \
+            --output appimage
+
+          built="$(find . -maxdepth 1 -type f -name '*.AppImage' ! -name 'linuxdeploy*' -print -quit)"
+          if [[ -z "$built" ]]; then
+            echo "AppImage not found" >&2
+            ls -la ./*.AppImage 2>/dev/null || true
+            exit 1
+          fi
+          mv "$built" "$out"
+          chmod +x "$out"
+          echo "ASSET_NAME=$out" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ASSET_NAME }}
+          path: ${{ env.ASSET_NAME }}
+          if-no-files-found: error
+
+  build-windows:
+    name: Build (windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            make
+            zip
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-gtk2
+            mingw-w64-x86_64-curl
+            mingw-w64-x86_64-mesa
+
+      - name: Build (static-preferring link)
+        shell: msys2 {0}
+        env:
+          CFLAGS: -O2 -Werror
+        run: |
+          make clean
+          make STATIC=1
+
+      - name: Package Windows zip
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          out="c-weather-gtk2-windows-x86_64.zip"
+          chmod +x packaging/windows-bundle-dlls.sh packaging/ensure-ca-bundle.sh
+          rm -rf dist-win
+          packaging/windows-bundle-dlls.sh ./c-weather-gtk2.exe dist-win
+          (cd dist-win && zip -r "../$out" .)
+          echo "ASSET_NAME=$out" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ASSET_NAME }}
+          path: ${{ env.ASSET_NAME }}
+          if-no-files-found: error
+
+  release:
+    name: Create release
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          short_sha="$(echo "${GITHUB_SHA}" | cut -c1-7)"
+          tag="main-${short_sha}"
+          title="main @ ${short_sha}"
+          body="$(printf '%s\n\nCommit: %s\n\nPortable builds (STATIC=1):\n- Linux: AppImage (GTK2/curl bundled)\n- Windows: zip with exe + MinGW DLLs + curl-ca-bundle.crt\n\nFull `-static` of GTK is not available from distro packages; runtime/C library and curl are linked statically where possible.\nTray: GtkStatusIcon (legacy system tray).' \
+            "$(git log -1 --pretty=%B)" "${GITHUB_SHA}")"
+
+          ls -la dist/
+          gh release create "$tag" dist/* \
+            --title "$title" \
+            --notes "$body" \
+            --target "${GITHUB_SHA}"
