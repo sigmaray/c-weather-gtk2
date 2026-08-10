@@ -192,12 +192,14 @@ bool http_get(const char *url, const char *user_agent, HttpResponse *out) {
     }
 
     struct timespec start, end;
-    clock_gettime(CLOCK_MONOTONIC, &start);
+    int have_start = (clock_gettime(CLOCK_MONOTONIC, &start) == 0);
     CURLcode rc = curl_easy_perform(curl);
-    clock_gettime(CLOCK_MONOTONIC, &end);
+    int have_end = (clock_gettime(CLOCK_MONOTONIC, &end) == 0);
 
-    out->duration_ms = (end.tv_sec - start.tv_sec) * 1000L +
-                       (end.tv_nsec - start.tv_nsec) / 1000000L;
+    if (have_start && have_end) {
+        out->duration_ms = (end.tv_sec - start.tv_sec) * 1000L +
+                           (end.tv_nsec - start.tv_nsec) / 1000000L;
+    }
 
     if (rc != CURLE_OK) {
         snprintf(out->error, sizeof(out->error), "%s", curl_easy_strerror(rc));
