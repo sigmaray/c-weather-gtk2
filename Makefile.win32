@@ -27,6 +27,9 @@ PKG_LIBS := $(shell $(PKG_CONFIG_ENV) pkg-config --libs gtk+-2.0 libcurl 2>/dev/
 ALL_CFLAGS := $(XP_CFLAGS) $(PKG_CFLAGS)
 LDFLAGS ?=
 LDFLAGS += -L$(MINGW32_PREFIX)/lib
+# PE major/minor 5.1 so XP accepts the image (default MinGW is Vista+ → "not a valid Win32 application").
+XP_PE_VERSION := -Wl,--major-os-version,5 -Wl,--minor-os-version,1 \
+	-Wl,--major-subsystem-version,5 -Wl,--minor-subsystem-version,1
 LIBS := $(PKG_LIBS) -lm
 
 ifeq ($(STATIC),1)
@@ -69,7 +72,7 @@ done)
 all: c-weather-gtk2.exe
 
 c-weather-gtk2.exe: $(OBJS)
-	$(CC) $(LDFLAGS) -mwindows -o $@ $(OBJS) $(LIBS)
+	$(CC) $(LDFLAGS) $(XP_PE_VERSION) -mwindows -o $@ $(OBJS) $(LIBS)
 
 %.o: %.c
 	$(CC) $(ALL_CFLAGS) -c -o $@ $<
@@ -81,7 +84,7 @@ test: c-weather-gtk2-tests.exe
 	./c-weather-gtk2-tests.exe
 
 c-weather-gtk2-tests.exe: $(TEST_OBJS) $(TEST_LIB_OBJS)
-	$(CC) $(LDFLAGS) -mconsole -o $@ $(TEST_OBJS) $(TEST_LIB_OBJS) $(LIBS)
+	$(CC) $(LDFLAGS) $(XP_PE_VERSION) -mconsole -o $@ $(TEST_OBJS) $(TEST_LIB_OBJS) $(LIBS)
 
 clean:
 	rm -f $(OBJS) $(TEST_OBJS) $(TEST_LIB_OBJS) \

@@ -85,43 +85,37 @@ jobs:
           path: ${{ env.ASSET_NAME }}
           if-no-files-found: error
 
-  build-windows:
-    name: Build (windows)
-    runs-on: windows-latest
+  build-windows-xp:
+    name: Build (windows-xp i686)
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup MSYS2
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: MINGW64
-          update: true
-          install: >-
-            make
-            zip
-            mingw-w64-x86_64-gcc
-            mingw-w64-x86_64-pkgconf
-            mingw-w64-x86_64-gtk2
-            mingw-w64-x86_64-curl
-            mingw-w64-x86_64-mesa
-
-      - name: Build (static-preferring link)
-        shell: msys2 {0}
-        env:
-          CFLAGS: -O2 -Werror
+      - name: Install packaging tools
         run: |
-          make clean
-          make STATIC=1
+          sudo apt-get update
+          sudo apt-get install -y p7zip-full zip pkg-config curl ca-certificates
 
-      - name: Package Windows zip
-        shell: msys2 {0}
+      - name: Cross-build Windows XP (i686)
         run: |
           set -euo pipefail
-          out="c-weather-gtk2-windows-x86_64.zip"
-          chmod +x packaging/windows-bundle-dlls.sh packaging/ensure-ca-bundle.sh
-          rm -rf dist-win
-          packaging/windows-bundle-dlls.sh ./c-weather-gtk2.exe dist-win
-          (cd dist-win && zip -r "../$out" .)
+          chmod +x packaging/*.sh
+          ./packaging/build-win32.sh clean all c-weather-gtk2-tests.exe STATIC=1
+          file c-weather-gtk2.exe | tee /dev/stderr | grep -qi 'PE32'
+          # Reject PE32+ / x86-64 (XP consumer is 32-bit).
+          if file c-weather-gtk2.exe | grep -qiE 'x86-64|PE32\+'; then
+            echo "Refusing x86_64 Windows binary for XP release" >&2
+            exit 1
+          fi
+
+      - name: Package XP zip
+        run: |
+          set -euo pipefail
+          out="c-weather-gtk2-windows-xp-i686.zip"
+          ./packaging/download-xp-runtime.sh
+          rm -rf dist-xp
+          ./packaging/windows-xp-bundle-dlls.sh ./c-weather-gtk2.exe dist-xp
+          (cd dist-xp && zip -r "../$out" .)
           echo "ASSET_NAME=$out" >> "$GITHUB_ENV"
 
       - name: Upload artifact
@@ -133,7 +127,7 @@ jobs:
 
   release:
     name: Create release
-    needs: [build-linux, build-windows]
+    needs: [build-linux, build-windows-xp]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -152,7 +146,7 @@ jobs:
           short_sha="$(echo "${GITHUB_SHA}" | cut -c1-7)"
           tag="main-${short_sha}"
           title="main @ ${short_sha}"
-          body="$(printf '%s\n\nCommit: %s\n\nPortable builds (STATIC=1):\n- Linux: AppImage (GTK2/curl bundled)\n- Windows: zip with exe + MinGW DLLs + curl-ca-bundle.crt\n\nFull `-static` of GTK is not available from distro packages; runtime/C library and curl are linked statically where possible.\nTray: GtkStatusIcon (legacy system tray).' \
+          body="$(printf '%s\n\nCommit: %s\n\nPortable builds (STATIC=1):\n- Linux: AppImage (GTK2/curl bundled)\n- Windows XP: i686 zip (PE32, subsystem 5.1) + XP-safe GTK2/curl DLLs + curl-ca-bundle.crt\n  Run via run-c-weather-gtk2.cmd on XP.\n\nFull `-static` of GTK is not available from distro packages; runtime/C library and curl are linked statically where possible.\nTray: GtkStatusIcon (legacy system tray).' \
             "$(git log -1 --pretty=%B)" "${GITHUB_SHA}")"
 
           ls -la dist/

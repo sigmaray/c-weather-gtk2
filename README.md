@@ -53,18 +53,26 @@ make test   # unit-тесты (weather, settings, history, url_encode, icon)
 
 ## Windows XP
 
-Сборка под XP — через MSYS2 MinGW32 с пакетами GTK2:
+Релизный артефакт `c-weather-gtk2-windows-xp-i686.zip` — **32-bit (PE32)** под XP.
+Сборка `windows-x86_64` на XP не запускается (`is not a valid Win32 application`).
+
+Локально (Linux cross-compile, как в CI):
+
+```bash
+just bundle-win32   # → dist-xp/
+```
+
+Или вручную через MSYS2 MinGW32:
 
 ```bash
 pacman -S mingw-w64-i686-gcc mingw-w64-i686-gtk2 mingw-w64-i686-curl make pkgconf
-make CC=i686-w64-mingw32-gcc STATIC=1
-packaging/windows-bundle-dlls.sh ./c-weather-gtk2.exe dist-win
+make -f Makefile.win32 STATIC=1
+# лучше: just bundle-win32 (подставляет XP-совместимые GTK/curl DLL)
 ```
 
-Скопируйте `dist-win/` (или `dist-xp/` после `just bundle-win32`) на XP.
-В каталоге должен быть `curl-ca-bundle.crt` — без него libcurl на XP даёт
-`Problem with the SSL CA cert`. Запускайте через `run-c-weather-gtk2.cmd`
-(выставляет `CURL_CA_BUNDLE`).
+Скопируйте `dist-xp/` на XP. В каталоге должен быть `curl-ca-bundle.crt` — без него
+libcurl на XP даёт `Problem with the SSL CA cert`. Запускайте через
+`run-c-weather-gtk2.cmd` (выставляет `CURL_CA_BUNDLE`).
 
 ## Настройки
 

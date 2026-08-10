@@ -92,3 +92,34 @@ jobs:
           CC: gcc
           CFLAGS: -O2 -Werror
         run: make test
+
+  build-windows-xp:
+    name: Build (windows-xp i686)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y p7zip-full pkg-config curl ca-certificates
+
+      - name: Cross-build Windows XP (i686)
+        run: |
+          set -euo pipefail
+          chmod +x packaging/*.sh
+          ./packaging/build-win32.sh clean all c-weather-gtk2-tests.exe STATIC=1
+          file c-weather-gtk2.exe | tee /dev/stderr | grep -qi 'PE32'
+          if file c-weather-gtk2.exe | grep -qiE 'x86-64|PE32\+'; then
+            echo "Refusing x86_64 Windows binary" >&2
+            exit 1
+          fi
+
+      - name: Bundle XP runtime (smoke)
+        run: |
+          set -euo pipefail
+          ./packaging/download-xp-runtime.sh
+          ./packaging/windows-xp-bundle-dlls.sh ./c-weather-gtk2.exe dist-xp
+          test -f dist-xp/c-weather-gtk2.exe
+          test -s dist-xp/curl-ca-bundle.crt
+          test -f dist-xp/run-c-weather-gtk2.cmd
